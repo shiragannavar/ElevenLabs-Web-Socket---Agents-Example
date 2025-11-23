@@ -8,10 +8,8 @@ from queue import Queue
 import threading
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv('config.env')
 
-# Get credentials from environment
 AGENT_ID = os.getenv('AGENT_ID')
 API_KEY = os.getenv('API_KEY')
 
@@ -27,10 +25,8 @@ def index():
 
 @sock.route('/ws')
 def websocket_proxy(client_ws):
-    """Proxy WebSocket connection between client and ElevenLabs"""
     print("🔗 New client connection")
     
-    # Use credentials from environment
     agent_id = AGENT_ID
     api_key = API_KEY
     
@@ -42,7 +38,6 @@ def websocket_proxy(client_ws):
     
     print(f"📋 Using Agent ID: {agent_id[:20]}...")
     
-    # Wait for client ready signal
     try:
         ready_msg = client_ws.receive()
         ready = json.loads(ready_msg)
@@ -52,12 +47,10 @@ def websocket_proxy(client_ws):
         print(f"❌ Connection error: {e}")
         return
     
-    # Queues for communication between threads
     client_to_elevenlabs = Queue()
     elevenlabs_to_client = Queue()
     should_stop = threading.Event()
     
-    # Thread to read from client WebSocket
     def read_from_client():
         try:
             while not should_stop.is_set():
@@ -72,7 +65,6 @@ def websocket_proxy(client_ws):
         finally:
             should_stop.set()
     
-    # Thread to write to client WebSocket
     def write_to_client():
         try:
             while not should_stop.is_set():
@@ -87,7 +79,6 @@ def websocket_proxy(client_ws):
         finally:
             should_stop.set()
     
-    # Async function to handle ElevenLabs connection
     async def elevenlabs_handler():
         uri = f"wss://api.elevenlabs.io/v1/convai/conversation?agent_id={agent_id}"
         headers = {"xi-api-key": api_key}
@@ -98,18 +89,15 @@ def websocket_proxy(client_ws):
             async with websockets.connect(uri, extra_headers=headers, ping_interval=20) as elevenlabs_ws:
                 print("✅ Connected to ElevenLabs")
                 
-                # Send connection success to client
                 elevenlabs_to_client.put(json.dumps({'status': 'connected'}))
                 
                 async def send_to_elevenlabs():
-                    """Send messages from client to ElevenLabs"""
                     try:
                         while not should_stop.is_set():
                             if not client_to_elevenlabs.empty():
                                 msg = client_to_elevenlabs.get()
                                 await elevenlabs_ws.send(msg)
                                 
-                                # Log what we're sending
                                 try:
                                     data = json.loads(msg)
                                     msg_type = data.get('type', 'unknown')
@@ -124,10 +112,8 @@ def websocket_proxy(client_ws):
                         should_stop.set()
                 
                 async def receive_from_elevenlabs():
-                    """Receive messages from ElevenLabs and forward to client"""
                     try:
                         async for message in elevenlabs_ws:
-                            # Parse message to log it
                             try:
                                 data = json.loads(message)
                                 msg_type = data.get('type', 'unknown')
@@ -139,13 +125,11 @@ def websocket_proxy(client_ws):
                             except:
                                 pass
                             
-                            # Forward to client
                             elevenlabs_to_client.put(message)
                     except Exception as e:
                         print(f"❌ Receive from ElevenLabs error: {e}")
                         should_stop.set()
                 
-                # Run both async tasks
                 await asyncio.gather(
                     send_to_elevenlabs(),
                     receive_from_elevenlabs()
@@ -156,14 +140,12 @@ def websocket_proxy(client_ws):
             elevenlabs_to_client.put(json.dumps({'error': f'ElevenLabs connection failed: {str(e)}'}))
             should_stop.set()
     
-    # Start threads
     client_reader = threading.Thread(target=read_from_client, daemon=True)
     client_writer = threading.Thread(target=write_to_client, daemon=True)
     
     client_reader.start()
     client_writer.start()
     
-    # Run async ElevenLabs handler in new event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
